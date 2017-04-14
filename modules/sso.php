@@ -650,12 +650,17 @@ class Jetpack_SSO {
 	function handle_login() {
 		$wpcom_nonce   = sanitize_key( $_GET['sso_nonce'] );
 		$wpcom_user_id = (int) $_GET['user_id'];
+		$invite_key = isset( $_GET['invite_key'] )
+			? sanitize_key( $_GET['invite_key'] )
+			: '';
 
 		Jetpack::load_xml_rpc_client();
 		$xml = new Jetpack_IXR_Client( array(
-			'user_id' => get_current_user_id(),
+			'user_id' => get_current_user_id()
 		) );
-		$xml->query( 'jetpack.sso.validateResult', $wpcom_nonce, $wpcom_user_id );
+		$xml->query( 'jetpack.sso.validateResult', $wpcom_nonce, $wpcom_user_id, $invite_key );
+
+		error_log( sprintf( 'Sent to API: %s, %s, %s', $wpcom_nonce, $wpcom_user_id, $invite_key ) );
 
 		$user_data = $xml->isError() ? false : $xml->getResponse();
 		if ( empty( $user_data ) ) {
@@ -710,8 +715,8 @@ class Jetpack_SSO {
 		}
 
 		// If we've still got nothing, create the user.
-		$new_user_override_role = false;
-		if ( empty( $user ) && ( get_option( 'users_can_register' ) || ( $new_user_override_role = Jetpack_SSO_Helpers::new_user_override( $user_data ) ) ) ) {
+		$new_user_override_role = Jetpack_SSO_Helpers::new_user_override( $user_data );
+		if ( empty( $user ) && ( $new_user_override_role || ! empty( $user_data->from_invite ) || get_option( 'users_can_register' ) ) ) {
 			/**
 			 * If not matching by email we still need to verify the email does not exist
 			 * or this blows up
@@ -721,9 +726,11 @@ class Jetpack_SSO {
 			 * user, then we know that email is unused, so it's safe to add.
 			 */
 			if ( Jetpack_SSO_Helpers::match_by_email() || ! get_user_by( 'email', $user_data->email ) ) {
-
 				if ( $new_user_override_role ) {
 					$user_data->role = $new_user_override_role;
+				}
+				if ( $user_data->from_invite ) {
+					$user_data->role = $user_data->from_invite;
 				}
 
 				$user = Jetpack_SSO_Helpers::generate_user( $user_data );
@@ -735,9 +742,13 @@ class Jetpack_SSO {
 					return;
 				}
 
-				$user_found_with = $new_user_override_role
-					? 'user_created_new_user_override'
-					: 'user_created_users_can_register';
+				if ( $new_user_override_role ) {
+					$user_found_with = 'user_created_new_user_override';
+				} else if ( $user_data->from_invite ) {
+					$user_found_with = 'user_created_from_invite';
+				} else {
+					$user_found_with = 'user_created_users_can_register';
+				}
 			} else {
 				JetpackTracking::record_user_event( 'sso_login_failed', array(
 					'error_message' => 'error_msg_email_already_exists'

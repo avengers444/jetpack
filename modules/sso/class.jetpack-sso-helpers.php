@@ -244,7 +244,10 @@ class Jetpack_SSO_Helpers {
 		wp_update_user( $user );
 
 		update_user_meta( $user->ID, 'wpcom_user_id', $user_data->ID );
-		
+		if ( ! empty( $user_data->from_invite ) ) {
+			update_user_meta( $user->ID, 'wpcom_from_invite', '1' );
+		}
+
 		return $user;
 	}
 
